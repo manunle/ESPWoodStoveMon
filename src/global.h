@@ -9,7 +9,7 @@ int cNTP_Update = 0;											// Counter for Updating the time via NTP
 volatile unsigned long cHeartbeat = 0;    // Counter for heartbeat (updated by NTP)
 volatile unsigned int TempTime = 0;
 Ticker tkSecond;												  // Second - Timer for Updating Datetime Structure
-
+void mainTick();
 #define LED_esp 2
 
 //custom declarations

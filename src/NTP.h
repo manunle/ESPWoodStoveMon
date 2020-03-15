@@ -29,90 +29,6 @@ strDateTime DateTime;                      // Global DateTime structure, will be
 const int NTP_PACKET_SIZE = 48;
 byte packetBuffer[ NTP_PACKET_SIZE];
 
-/***************************************************
-/*
- * © Francesco Potortì 2013 - GPLv3 - Revision: 1.13
- *
- * Send an NTP packet and wait for the response, return the Unix time
- *
- * To lower the memory footprint, no buffers are allocated for sending
- * and receiving the NTP packets.  Four bytes of memory are allocated
- * for transmision, the rest is random garbage collected from the data
- * memory segment, and the received packet is read one byte at a time.
- * The Unix time is returned, that is, seconds from 1970-01-01T00:00.
- */
-/*unsigned long inline ntpUnixTime ()
-{
-  Serial.println("Getting time....");
-  static int udpInited = UDPNTPClient.begin(123); // open socket on arbitrary port
-
-  const char timeServer[] = "1.ubuntu.pool.ntp.org";  // NTP server
-
-  // Only the first four bytes of an outgoing NTP packet need to be set
-  // appropriately, the rest can be whatever.
-  const long ntpFirstFourBytes = 0xEC0600E3; // NTP request header
-
-  // Fail if WiFiUdp.begin() could not init a socket
-  if (! udpInited)
-  {
-    Serial.println("not inited");
-    return 0;
-  }
-
-  // Clear received data from possible stray received packets
-  UDPNTPClient.flush();
-
-  // Send an NTP request
-  if (! (UDPNTPClient.beginPacket(timeServer, 123) // 123 is the NTP port
-	 && UDPNTPClient.write((byte *)&ntpFirstFourBytes, 48) == 48
-	 && UDPNTPClient.endPacket()))
-  {
-    Serial.println("Sending request failed");
-    return 0;				// sending request failed
-  }
-  // Wait for response; check every pollIntv ms up to maxPoll times
-  const int pollIntv = 150;		// poll every this many ms
-  const byte maxPoll = 15;		// poll up to this many times
-  int pktLen;				// received packet length
-  for (byte i=0; i<maxPoll; i++) {
-    if ((pktLen = UDPNTPClient.parsePacket()) == 48)
-      break;
-    Serial.println("delaying");  
-    delay(pollIntv);
-  }
-  Serial.println("got " + String(pktLen));
-  if (pktLen != 48)
-  {
-    Serial.println("No correct packet received " + String(pktLen));
-    return 0;				// no correct packet received
-  }
-  // Read and discard the first useless bytes
-  // Set useless to 32 for speed; set to 40 for accuracy.
-  const byte useless = 40;
-  for (byte i = 0; i < useless; ++i)
-    UDPNTPClient.read();
-
-  // Read the integer part of sending time
-  unsigned long time = UDPNTPClient.read();	// NTP time
-  for (byte i = 1; i < 4; i++)
-    time = time << 8 | UDPNTPClient.read();
-
-  // Round to the nearest second if we want accuracy
-  // The fractionary part is the next byte divided by 256: if it is
-  // greater than 500ms we round to the next second; we also account
-  // for an assumed network delay of 50ms, and (0.5-0.05)*256=115;
-  // additionally, we account for how much we delayed reading the packet
-  // since its arrival, which we assume on average to be pollIntv/2.
-  time += (UDPNTPClient.read() > 115 - pollIntv/8);
-
-  // Discard the rest of the packet
-  UDPNTPClient.flush();
-  Serial.println(String(time));
-  return time - 2208988800ul;		// convert NTP time to Unix time
-}
-*/
-/***************************************************/
-
 void getNTPtime(){
   unsigned long _unixTime = 0;
 
@@ -226,14 +142,14 @@ boolean summerTime(unsigned long _timeStamp ) {
 
   if (_tempDateTime.month < 3 || _tempDateTime.month > 10) return false; // keine Sommerzeit in Jan, Feb, Nov, Dez
   if (_tempDateTime.month > 3 && _tempDateTime.month < 10) return true; // Sommerzeit in Apr, Mai, Jun, Jul, Aug, Sep
-  if (_tempDateTime.month == 3 && (_tempDateTime.hour + 24 * _tempDateTime.day) >= (3 +  24 * (31 - (5 * _tempDateTime.year / 4 + 4) % 7)) || _tempDateTime.month == 10 && (_tempDateTime.hour + 24 * _tempDateTime.day) < (3 +  24 * (31 - (5 * _tempDateTime.year / 4 + 1) % 7)))
+  if (((_tempDateTime.month == 3) && (_tempDateTime.hour + 24 * _tempDateTime.day) >= (3 +  24 * (31 - (5 * _tempDateTime.year / 4 + 4) % 7))) || (_tempDateTime.month == 10 && (_tempDateTime.hour + 24 * _tempDateTime.day) < (3 +  24 * (31 - (5 * _tempDateTime.year / 4 + 1) % 7))))
     return true;
   else
     return false;
 }
 
-unsigned long adjustTimeZone(unsigned long _timeStamp, int _timeZone, bool _isDayLightSavingSaving) {
-  strDateTime _tempDateTime;
+unsigned long adjustTimeZone(unsigned long _timeStamp, int _timeZone, bool _isDayLightSavingSaving) 
+{
   _timeStamp += _timeZone *  360; // adjust timezone
   // printTime("Innerhalb adjustTimeZone ", ConvertUnixTimeStamp(_timeStamp));
   if (_isDayLightSavingSaving && summerTime(_timeStamp)) _timeStamp += 3600; // Sommerzeit beachten
@@ -249,7 +165,7 @@ void ISRsecondTick(){
   absoluteActualTime = adjustTimeZone(UnixTimestamp, config.timeZone, config.isDayLightSaving);
   DateTime = ConvertUnixTimeStamp(absoluteActualTime);  //  convert to DateTime format
   actualTime = 3600 * DateTime.hour + 60 * DateTime.minute + DateTime.second;
-
+  mainTick();
 //  Serial.println(String(DateTime.hour) + ":" + String(DateTime.minute) + ":" + String(DateTime.second));
 
   if (millis() - customWatchdog > 30000){

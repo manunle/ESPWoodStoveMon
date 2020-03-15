@@ -17,8 +17,8 @@ struct strConfig {
   String OTApwd;                         // up to 32 Byte - EEPROM 154
   String MQTTServer;                    // up to 32 Byte - EEPROM 186
   long MQTTPort;                        // 4 Byte - EEPROM 218
-  long HeartbeatEvery;                  // 4 Byte - EEPROM 222
-  long TemperatureDelay;                // 4 Byte - EEPROM 226
+  unsigned long HeartbeatEvery;                  // 4 Byte - EEPROM 222
+  unsigned long TemperatureDelay;                // 4 Byte - EEPROM 226
   int OnTemperature;                    // 2 byte - EEPROM 230
   int OffTemperature;                   // 2 byte - EEPROM 232
   // Application Settings here... from EEPROM 230 up to 511 (0 - 511)
@@ -168,7 +168,7 @@ struct strConfig {
   void WriteStringToEEPROM(int beginaddress, String string){
     char  charBuf[string.length() + 1];
     string.toCharArray(charBuf, string.length() + 1);
-    for (int t =  0; t < sizeof(charBuf); t++)
+    for (unsigned int t =  0; t < sizeof(charBuf); t++)
     {
       EEPROM.write(beginaddress + t, charBuf[t]);
     }

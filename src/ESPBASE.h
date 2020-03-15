@@ -330,7 +330,7 @@ void ESPBASE::loop()
         // Client connected
         mqttClient->loop();
       }
-      if(millis() - NTP_Time > (config.Update_Time_Via_NTP_Every * 60000l))
+      if(millis() - NTP_Time > (config.Update_Time_Via_NTP_Every * 60000ul))
       {
 //        UnixTimestamp = ntpUnixTime ();
         NTP_Time = millis();

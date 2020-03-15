@@ -1,20 +1,32 @@
 #include <Arduino.h>
 #include "ESPBASE.h"
-#include "31850OneWire.h"
+//#include "31850OneWire.h"
 #include "MAX31850Temp.h"
+#include "fanspeedcontrol.h"
 
-#define TEMP_PIN 4
-#define RELAY1_PIN 12
-#define RELAY2_PIN 13
+#define TEMP_PIN D4
+//#define RELAY1_PIN 12
+//#define RELAY2_PIN 13
+#define MINSPEED 120
+#define fanpin1 D1
+#define fanpin2 D2
+
+#define MAXSPEED 1024
 byte relay1state = 0;
 byte relay2state = 0;
-String RelayTopic;
+String CommandTopic;
 String StatusTopic;
 String ValueTopic;
 String sChipID;
-
+int insideTemp = -20;
+int insideTempTimeout = 0;
+unsigned int fanspeed = 0;
+//dimmerLamp* fandimmer;
+FanSpeedControler* fanspeed1;
+FanSpeedControler* fanspeed2;
 ESPBASE Esp;
 MAX31850* mytemp = new MAX31850(TEMP_PIN);
+float stovetemp = 0.0;
 
 void setup() 
 {
@@ -24,64 +36,92 @@ void setup()
     sChipID = String(cChipID);
 
     Esp.initialize();
-    RelayTopic = String(DEVICE_TYPE) + "/" + config.DeviceName + "/command";
+    CommandTopic = String(DEVICE_TYPE) + "/" + config.DeviceName + "/command";
     StatusTopic = String(DEVICE_TYPE) + "/" + config.DeviceName + "/status";
     ValueTopic = String(DEVICE_TYPE) + "/" + config.DeviceName + "/value";
     mqttSubscribe();
-
-    pinMode(RELAY1_PIN,OUTPUT);
-    pinMode(RELAY2_PIN,OUTPUT);
-    digitalWrite(RELAY1_PIN,LOW);
-    digitalWrite(RELAY2_PIN,LOW);
-
+    fanspeed1 = new FanSpeedControler(fanpin1,MAXSPEED,MINSPEED);
+    fanspeed2 = new FanSpeedControler(fanpin2,MAXSPEED,MINSPEED);
     Serial.println("Done with setup");
 }
 
 void sendStatus()
 {
-  String message = "Woodstove,1,";
-  if(relay1state == 1)
-    message = message + "on";
-  else
-    message = message + "off";
-  message = message + ":Woodstove,2,";
-  if(relay2state == 1)
-    message = message + "on";
-  else
-    message = message + "off";
-  Esp.mqttSend(StatusTopic,"",message);
+  Esp.mqttSend(StatusTopic,"fanspeed1",fanspeed1->getDebugStr() + " stovetemp:" + String(stovetemp) + " it:" + String(insideTemp));
+  Esp.mqttSend(StatusTopic,"fanspeed2",fanspeed2->getDebugStr());
 }
 
 void loop() 
 {
-    static int count = 0;
-    if(TempTime >= config.TemperatureDelay and config.TemperatureDelay > 0)
+  static int count = 0;
+  if(TempTime >= config.TemperatureDelay and config.TemperatureDelay > 0)
+  {
+    TempTime = 0;
+    // commented for testing
+    stovetemp = mytemp->getTemp();
+    Serial.println(String(stovetemp));
+    /**********
+     * Set the fan speed here
+     * ***************/
+    fanspeed = MINSPEED;
+    if(insideTemp == -20)
     {
-        TempTime = 0;
-        float stovetemp = mytemp->getTemp();
-        Serial.println(String(stovetemp));
-        if((int) stovetemp >= config.OnTemperature && relay1state == 0)
+      if(stovetemp > 70)
+        fanspeed = 200;
+      if(stovetemp > 80)
+        fanspeed = 400;
+      if(stovetemp > 90)
+        fanspeed = 600;
+      if(stovetemp > 100)
+        fanspeed = 800;
+      if(stovetemp > 120)
+        fanspeed = MAXSPEED;
+    }
+    else
+    {
+      int dif = (int)stovetemp - insideTemp;
+      if(insideTemp < 65)
+      {
+        fanspeed = dif * 50;
+      }
+      else
+        if(insideTemp < 75)
         {
-          relay1state = 1;
-          digitalWrite(RELAY1_PIN,HIGH);
-          sendStatus();
-        }
-        if((int) stovetemp < config.OffTemperature && relay1state == 1)
-        {
-          relay1state = 0;
-          digitalWrite(RELAY1_PIN,LOW);
-          sendStatus();
-        }
-        count++;
-        if(count > 6)
-        {
-            count = 0;
-            String topic = String(DEVICE_TYPE) + "/" + config.DeviceName + "/value";
-            String message = "StoveTemp:" + String(stovetemp);
-            Esp.mqttSend(topic,"",message);
+          fanspeed = dif * 10;
         }
     }
-    Esp.loop();
+    if(fanspeed > MAXSPEED)
+      fanspeed = MAXSPEED;
+    if(fanspeed < MINSPEED)
+      fanspeed = MINSPEED;
+    fanspeed1->setSpeed(fanspeed);
+    fanspeed2->setSpeed(fanspeed);
+    count++;
+    if(count > 6)
+    {
+      count = 0;
+      String topic = String(DEVICE_TYPE) + "/" + config.DeviceName + "/value";
+      String message = "StoveTemp:" + String(stovetemp) + " Fanspeed:" + String(fanspeed);
+      Esp.mqttSend(topic,"",message);
+      }
+  }
+  Esp.loop();
+}
+
+String getValue(String data, char separator, int index)
+{
+    int found = 0;
+    int strIndex[] = { 0, -1 };
+    int maxIndex = data.length() - 1;
+
+    for (int i = 0; i <= maxIndex && found <= index; i++) {
+        if (data.charAt(i) == separator || i == maxIndex) {
+            found++;
+            strIndex[0] = strIndex[1] + 1;
+            strIndex[1] = (i == maxIndex) ? i+1 : i;
+        }
+    }
+    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
 }
 
 String getSignalString()
@@ -107,66 +147,30 @@ void mqttCallback(char* topic, byte* payload, unsigned int length)
   
   String s_topic = String(topic);
   String s_payload = String(c_payload);
-  if (s_topic == RelayTopic || s_topic == "AllLights" || s_topic == "computer/timer/event") 
+  if(s_topic == "Temperature/test1temp/value") // maybe put this in the config ?
+  {
+    String stemp = getValue(s_payload,':',1);
+    Serial.println(stemp);
+    insideTemp=stemp.toFloat();
+    insideTempTimeout = 600; // house temperature timeout set to 10 minutes.  Maybe put this in the config?
+  }
+//  if(s_topic == "EDWoodstove/woodstove/value") // maybe put this in the config ?
+//  {
+//    Serial.println("Got woodstove temp");
+//    String stemp = getValue(s_payload,':',1);
+//    Serial.println(stemp);
+//    stovetemp = stemp.toFloat(); // house temperature timeout set to 10 minutes.  Maybe put this in the config?
+//  }
+  if (s_topic == CommandTopic) 
   {
     if(s_payload == "signal")
     {
       Esp.mqttSend(StatusTopic,sChipID," WiFi: " + getSignalString());
     }
-    if(s_payload == "TOGGLE")
+    if(s_payload == "status")
     {
-      if(relay1state == 1)
-      {
-        s_payload = "OFF";
-      }
-      else
-      {
-        s_payload = "ON";
-      }
+      sendStatus();
     }
-    if(s_payload == "TOGGLE_1")
-    {
-      if(relay1state == 1)
-      {
-        s_payload = "OFF_1";
-      }
-      else
-      {
-        s_payload = "ON_1";
-      }
-    }
-    if(s_payload == "TOGGLE_2")
-    {
-      if(relay2state == 1)
-      {
-        s_payload = "OFF_2";
-      }
-      else
-      {
-        s_payload = "ON_2";
-      }
-    }
-    if(s_payload == "ON_1" || s_payload == "ON")
-    {
-      relay1state = 1;
-      digitalWrite(RELAY1_PIN,HIGH);
-    }
-    if(s_payload == "OFF_1" || s_payload == "OFF")
-    {
-      relay1state = 0;
-      digitalWrite(RELAY1_PIN,LOW);
-    }
-    if(s_payload == "ON_2" || s_payload == "ON")
-    {
-      relay2state = 1;
-      digitalWrite(RELAY2_PIN,HIGH);
-    }
-    if(s_payload == "OFF_2" || s_payload == "OFF")
-    {
-      relay2state = 0;
-      digitalWrite(RELAY2_PIN,LOW);
-    }
-    sendStatus();
   }
 }
 
@@ -174,11 +178,40 @@ void mqttSubscribe()
 {
     if(Esp.mqttClient->connected())
     {
-        if(Esp.mqttClient->subscribe(RelayTopic.c_str()))
+        if(Esp.mqttClient->subscribe(CommandTopic.c_str()))
         {
-            Serial.println("Subscribed to " + RelayTopic);
-            Esp.mqttSend(StatusTopic,"","Subscribed to " + RelayTopic);
+            Serial.println("Subscribed to " + CommandTopic);
+            Esp.mqttSend(StatusTopic,"","Subscribed to " + CommandTopic);
             Esp.mqttSend(StatusTopic,verstr,","+Esp.MyIP()+" start");
         }
+        String temptopic = "Temperature/test1temp/value";
+        if(Esp.mqttClient->subscribe(temptopic.c_str()))
+        {
+            Serial.println("Subscribed to " + temptopic);
+            Esp.mqttSend(StatusTopic,"","Subscribed to " + temptopic);
+        }
+        // just for testing
+        String wstemptopic = "EDWoodstove/woodstove/value";
+        if(Esp.mqttClient->subscribe(wstemptopic.c_str()))
+        {
+            Serial.println("Subscribed to " + wstemptopic);
+            Esp.mqttSend(StatusTopic,"","Subscribed to " + wstemptopic);
+        }
+
     }
+}
+
+void mainTick()
+{
+  insideTempTimeout--;
+  if(insideTempTimeout <= 0)
+  {
+    insideTempTimeout = 0;
+    insideTemp = -20;
+  }
+  fanspeed1->tick();
+  fanspeed2->tick();
+//  Esp.mqttSend(StatusTopic,"fanspeed1",fanspeed1->getDebugStr() + " stovetemp:" + String(stovetemp) + " it:" + String(insideTemp));
+//  Esp.mqttSend(StatusTopic,"fanspeed2",fanspeed2->getDebugStr());
+//  Serial.println(insideTempTimeout);
 }

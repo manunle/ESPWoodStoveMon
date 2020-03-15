@@ -25,8 +25,8 @@ float MAX31850::getTemp()
   byte present = 0;
   
   if ( !ds->search(addr)) {
-//    Serial.println("No more addresses.");
-//    Serial.println();
+    Serial.println("No more addresses.");
+    Serial.println();
     ds->reset_search();
     delay(250);
 //    return 1;
